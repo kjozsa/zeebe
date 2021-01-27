@@ -18,14 +18,12 @@ import java.util.Properties;
 import org.agrona.CloseHelper;
 import org.rocksdb.BlockBasedTableConfig;
 import org.rocksdb.BloomFilter;
-import org.rocksdb.Cache;
 import org.rocksdb.ColumnFamilyOptions;
 import org.rocksdb.CompactionPriority;
 import org.rocksdb.CompactionStyle;
 import org.rocksdb.CompressionType;
 import org.rocksdb.DBOptions;
 import org.rocksdb.DataBlockIndexType;
-import org.rocksdb.Filter;
 import org.rocksdb.IndexType;
 import org.rocksdb.LRUCache;
 import org.rocksdb.Options;
@@ -72,12 +70,12 @@ public final class ZeebeRocksDbFactory<ColumnFamilyType extends Enum<ColumnFamil
     final List<AutoCloseable> closeables = new ArrayList<>();
     try {
       // column family options have to be closed as last
-      final ColumnFamilyOptions columnFamilyOptions = createColumnFamilyOptions(closeables);
+      final var columnFamilyOptions = createColumnFamilyOptions(closeables);
       closeables.add(columnFamilyOptions);
-      final DBOptions dbOptions = createDefaultDbOptions(closeables);
+      final var dbOptions = createDefaultDbOptions(closeables);
       closeables.add(dbOptions);
 
-      final Options options = new Options(dbOptions, columnFamilyOptions);
+      final var options = new Options(dbOptions, columnFamilyOptions);
       closeables.add(options);
 
       db =
@@ -92,7 +90,7 @@ public final class ZeebeRocksDbFactory<ColumnFamilyType extends Enum<ColumnFamil
   }
 
   private DBOptions createDefaultDbOptions(final List<AutoCloseable> closeables) {
-    final Statistics statistics = new Statistics();
+    final var statistics = new Statistics();
     closeables.add(statistics);
     statistics.setStatsLevel(StatsLevel.ALL);
 
@@ -124,30 +122,31 @@ public final class ZeebeRocksDbFactory<ColumnFamilyType extends Enum<ColumnFamil
   }
 
   /** @return Options which are used on all column families */
-  public ColumnFamilyOptions createColumnFamilyOptions(final List<AutoCloseable> closeables) {
+  ColumnFamilyOptions createColumnFamilyOptions(final List<AutoCloseable> closeables) {
 
     final var hasUserOptions = !userProvidedColumnFamilyOptions.isEmpty();
 
     if (hasUserOptions) {
-      final var columnFamilyOptionProps = new Properties();
-      // apply custom options
-      columnFamilyOptionProps.putAll(userProvidedColumnFamilyOptions);
-
-      final var columnFamilyOptions =
-          ColumnFamilyOptions.getColumnFamilyOptionsFromProps(columnFamilyOptionProps);
-      if (columnFamilyOptions == null) {
-        throw new IllegalStateException(
-            String.format(
-                "Expected to create column family options for RocksDB, "
-                    + "but one or many values are undefined in the context of RocksDB "
-                    + "[Compiled ColumnFamilyOptions: %s; User-provided ColumnFamilyOptions: %s]. "
-                    + "See RocksDB's cf_options.h and options_helper.cc for available keys and values.",
-                columnFamilyOptionProps, userProvidedColumnFamilyOptions));
-      }
-      return columnFamilyOptions;
+      return createFromUserOptions(userProvidedColumnFamilyOptions);
     }
 
     return createDefaultColumnFamilyOptions(closeables);
+  }
+
+  private ColumnFamilyOptions createFromUserOptions(
+      final Properties userProvidedColumnFamilyOptions) {
+    final var columnFamilyOptions =
+        ColumnFamilyOptions.getColumnFamilyOptionsFromProps(userProvidedColumnFamilyOptions);
+    if (columnFamilyOptions == null) {
+      throw new IllegalStateException(
+          String.format(
+              "Expected to create column family options for RocksDB, "
+                  + "but one or many values are undefined in the context of RocksDB "
+                  + "[User-provided ColumnFamilyOptions: %s]. "
+                  + "See RocksDB's cf_options.h and options_helper.cc for available keys and values.",
+              userProvidedColumnFamilyOptions));
+    }
+    return columnFamilyOptions;
   }
 
   private ColumnFamilyOptions createDefaultColumnFamilyOptions(
@@ -155,31 +154,37 @@ public final class ZeebeRocksDbFactory<ColumnFamilyType extends Enum<ColumnFamil
     final var columnFamilyOptions = new ColumnFamilyOptions();
 
     // given
-    final long totalMemoryBudget = 512 * 1024 * 1024L; // make this configurable
+    final var totalMemoryBudget = 512 * 1024 * 1024L; // TODO: make this configurable
     // recommended by RocksDB, but we could tweak it; keep in mind we're also caching the indexes
     // and filters into the block cache, so we don't need to account for more memory there
-    final long blockCacheMemory = totalMemoryBudget / 3;
+    final var blockCacheMemory = totalMemoryBudget / 3;
     // flushing the memtables is done asynchronously, so there may be multiple memtables in memory,
     // although only a single one is writable. once we have too many memtables, writes will stop.
     // since prefix iteration is our bread n butter, we will build an additional filter for each
     // memtable which takes a bit of memory which must be accounted for from the memtable's memory
-    final int maxConcurrentMemtableCount = 6;
-    final double memtablePrefixFilterMemory = 0.15;
-    final long memtableMemory =
+    final var maxConcurrentMemtableCount = 6;
+    // this is a current guess and candidate for further tuning
+    // values can be between 0 and 0.25 (anything higher gets clamped to 0.25), we randomly picked
+    // 0.15
+    // prefix seek must be fast, so we allocate some extra memory of a single memtable budget to
+    // create
+    // a filter for each memtable, allowing us to skip the prefixes if possible
+    final var memtablePrefixFilterMemory = 0.15;
+    final var memtableMemory =
         Math.round(
             ((totalMemoryBudget - blockCacheMemory) / (double) maxConcurrentMemtableCount)
                 * (1 - memtablePrefixFilterMemory));
 
-    final TableFormatConfig tableConfig = createTableFormatConfig(closeables, blockCacheMemory);
+    final var tableConfig = createTableFormatConfig(closeables, blockCacheMemory);
 
     return columnFamilyOptions
-        // prefix seek must be fast, so allocate an extra 10% of a single memtable budget to create
-        // a filter for each memtable, allowing us to skip them if possible
+        // to extract our column family type (used as prefix) and seek faster
         .useFixedLengthPrefixExtractor(Long.BYTES)
         .setMemtablePrefixBloomSizeRatio(memtablePrefixFilterMemory)
         // memtables
         // merge at least 3 memtables per L0 file, otherwise all memtables are flushed as individual
         // files
+        // this is also a candidate for tuning, it was a rough guess
         .setMinWriteBufferNumberToMerge(Math.min(3, maxConcurrentMemtableCount))
         .setMaxWriteBufferNumberToMaintain(maxConcurrentMemtableCount)
         .setMaxWriteBufferNumber(maxConcurrentMemtableCount)
@@ -220,10 +225,10 @@ public final class ZeebeRocksDbFactory<ColumnFamilyType extends Enum<ColumnFamil
       final List<AutoCloseable> closeables, final long blockCacheMemory) {
     // you can use the perf context to check if we're often blocked on the block cache mutex, in
     // which case we want to increase the number of shards (shard count == 2^shardBits)
-    final Cache cache = new LRUCache(blockCacheMemory, 8, false, 0.15);
+    final var cache = new LRUCache(blockCacheMemory, 8, false, 0.15);
     closeables.add(cache);
 
-    final Filter filter = new BloomFilter(10, false);
+    final var filter = new BloomFilter(10, false);
     closeables.add(filter);
 
     return new BlockBasedTableConfig()

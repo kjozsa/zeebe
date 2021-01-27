@@ -8,6 +8,7 @@
 package io.zeebe.db.impl.rocksdb;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import io.zeebe.db.ZeebeDb;
 import io.zeebe.db.ZeebeDbFactory;
@@ -97,5 +98,26 @@ public final class ZeebeRocksDbFactoryTest {
             ColumnFamilyOptions::compactionPriority,
             ColumnFamilyOptions::numLevels)
         .containsExactly(ByteValue.ofMegabytes(16), CompactionPriority.ByCompensatedSize, 7);
+  }
+
+  @Test
+  public void shouldFailIfPropertiesDoesntExist() throws Exception {
+    // given
+    final var customProperties = new Properties();
+    customProperties.put("notExistingProperty", String.valueOf(ByteValue.ofMegabytes(16)));
+    final File pathName = temporaryFolder.newFolder();
+
+    final var factoryWithCustomOptions =
+        (ZeebeRocksDbFactory<DefaultColumnFamily>)
+            ZeebeRocksDbFactory.newFactory(DefaultColumnFamily.class, customProperties);
+
+    // expect
+    assertThatThrownBy(
+            () -> {
+              factoryWithCustomOptions.createDb(pathName);
+            })
+        .isInstanceOf(IllegalStateException.class)
+        .hasMessageContaining(
+            "Expected to create column family options for RocksDB, but one or many values are undefined in the context of RocksDB");
   }
 }
