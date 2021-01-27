@@ -77,10 +77,7 @@ public class ZeebeTransactionDb<ColumnFamilyNames extends Enum<ColumnFamilyNames
 
   public static <ColumnFamilyNames extends Enum<ColumnFamilyNames>>
       ZeebeTransactionDb<ColumnFamilyNames> openTransactionalDb(
-          final Options options,
-          final String path,
-          final List<AutoCloseable> closables,
-          final Class<ColumnFamilyNames> columnFamilyTypeClass)
+          final Options options, final String path, final List<AutoCloseable> closables)
           throws RocksDBException {
     final OptimisticTransactionDB optimisticTransactionDB =
         OptimisticTransactionDB.open(options, path);
@@ -99,7 +96,7 @@ public class ZeebeTransactionDb<ColumnFamilyNames extends Enum<ColumnFamilyNames
     }
   }
 
-  long getColumnFamilyHandle(final ColumnFamilyNames columnFamily) {
+  long getColumnFamilyHandle() {
     return getNativeHandle(defaultHandle);
   }
 
@@ -226,8 +223,7 @@ public class ZeebeTransactionDb<ColumnFamilyNames extends Enum<ColumnFamilyNames
   //////////////////////////// ITERATION /////////////////////////////
   ////////////////////////////////////////////////////////////////////
 
-  RocksIterator newIterator(
-      final long columnFamilyHandle, final DbContext context, final ReadOptions options) {
+  RocksIterator newIterator(final DbContext context, final ReadOptions options) {
     return context.newIterator(options, defaultHandle);
   }
 
@@ -252,8 +248,10 @@ public class ZeebeTransactionDb<ColumnFamilyNames extends Enum<ColumnFamilyNames
         });
   }
 
-  // This method is used mainly from other iterator methods to iterate over column family entries,
-  // which are prefixed with column family key.
+  /**
+   * This method is used mainly from other iterator methods to iterate over column family entries,
+   * which are prefixed with column family key.
+   */
   protected <KeyType extends DbKey, ValueType extends DbValue> void whileEqualPrefix(
       final DbLong columnFamilyKey,
       final long columnFamilyHandle,
@@ -315,8 +313,7 @@ public class ZeebeTransactionDb<ColumnFamilyNames extends Enum<ColumnFamilyNames
             ensureInOpenTransaction(
                 context,
                 transaction -> {
-                  try (final RocksIterator iterator =
-                      newIterator(columnFamilyHandle, context, prefixReadOptions)) {
+                  try (final RocksIterator iterator = newIterator(context, prefixReadOptions)) {
 
                     columnFamilyKey.write(prefixKeyBuffer, 0);
                     prefix.write(prefixKeyBuffer, Long.BYTES);

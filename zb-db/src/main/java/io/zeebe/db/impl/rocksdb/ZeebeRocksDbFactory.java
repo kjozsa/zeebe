@@ -78,9 +78,7 @@ public final class ZeebeRocksDbFactory<ColumnFamilyType extends Enum<ColumnFamil
       final var options = new Options(dbOptions, columnFamilyOptions);
       closeables.add(options);
 
-      db =
-          ZeebeTransactionDb.openTransactionalDb(
-              options, pathName.getAbsolutePath(), closeables, columnFamilyTypeClass);
+      db = ZeebeTransactionDb.openTransactionalDb(options, pathName.getAbsolutePath(), closeables);
 
     } catch (final RocksDBException e) {
       CloseHelper.quietCloseAll(closeables);
@@ -154,7 +152,9 @@ public final class ZeebeRocksDbFactory<ColumnFamilyType extends Enum<ColumnFamil
     final var columnFamilyOptions = new ColumnFamilyOptions();
 
     // given
-    final var totalMemoryBudget = 512 * 1024 * 1024L; // TODO: make this configurable
+    final var totalMemoryBudget =
+        512 * 1024
+            * 1024L; // TODO: make this configurable https://github.com/zeebe-io/zeebe/issues/6159
     // recommended by RocksDB, but we could tweak it; keep in mind we're also caching the indexes
     // and filters into the block cache, so we don't need to account for more memory there
     final var blockCacheMemory = totalMemoryBudget / 3;
