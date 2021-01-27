@@ -151,7 +151,6 @@ public final class ZeebeRocksDbFactory<ColumnFamilyType extends Enum<ColumnFamil
       final List<AutoCloseable> closeables) {
     final var columnFamilyOptions = new ColumnFamilyOptions();
 
-    // given
     final var totalMemoryBudget =
         512 * 1024
             * 1024L; // TODO: make this configurable https://github.com/zeebe-io/zeebe/issues/6159
